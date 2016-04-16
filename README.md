@@ -1,6 +1,10 @@
 Gedit plugin: DBGp Debugging Client
 ===================================
 
+This is alpha version for gedit 3.14 and higher.
+
+Now start debugger with Ctrl-Shift-d and turn it off the same way
+
 This plugin allows you to use gedit-3 as a debugging-client using the DBGp protocol (e.g.: XDebug).
 
 ## Features

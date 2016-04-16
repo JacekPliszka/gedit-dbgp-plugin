@@ -14,19 +14,21 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-from gi.repository import GLib, Gtk, Gdk
+from gi.repository import GLib, Gtk
 from _thread import start_new_thread
 from gladehandler import GladeHandler
-from helpers import *
+# from helpers import *
 import socket
 import base64
 import time
+import os
 import xml.etree.ElementTree as ElementTree
 addiksdbgp = __import__("addiks-dbgp")
 
+
 class DebugSession:
     def __init__(self, plugin, clientSocket):
-        self._plugin  = plugin
+        self._plugin = plugin
         self._client_socket = clientSocket
         self._is_waiting_for_server = False
         self._glade_builder = None
@@ -68,22 +70,22 @@ class DebugSession:
 
     def init(self):
 
-#<?xml version="1.0" encoding="iso-8859-1"?>
-#<init xmlns="urn:debugger_protocol_v1" 
-#      xmlns:xdebug="http://xdebug.org/dbgp/xdebug" 
-#      fileuri="file:///usr/workspace/api.brille24.de/web/app.php" 
-#      language="PHP" 
-#      protocol_version="1.0" 
-#      appid="22855" 
-#      idekey="TEST">
-#  <engine version="2.2.3"><![CDATA[Xdebug]]></engine>
-#  <author><![CDATA[Derick Rethans]]></author>
-#  <url><![CDATA[http://xdebug.org]]></url>
-#  <copyright><![CDATA[Copyright (c) 2002-2013 by Derick Rethans]]></copyright>
-#</init>
+        # <?xml version="1.0" encoding="iso-8859-1"?>
+        # <init xmlns="urn:debugger_protocol_v1"
+        #      xmlns:xdebug="http://xdebug.org/dbgp/xdebug"
+        #      fileuri="file:///usr/workspace/api.brille24.de/web/app.php"
+        #      language="PHP"
+        #      protocol_verion="1.0"
+        #      appid="22855"
+        #      idekey="TEST">
+        #  <engine version="2.2.3"><![CDATA[Xdebug]]></engine>
+        #  <author><![CDATA[Derick Rethans]]></author>
+        #  <url><![CDATA[http://xdebug.org]]></url>
+        #  <copyright><![CDATA[Copyright (c) 2002-2013 by Derick Rethans]]></copyright>
+        # </init>
 
         initXml = self.__read_xml_packet()
-        
+
         self._options.update(initXml.attrib)
 
         profileManager = self._plugin.get_profile_manager()
@@ -91,7 +93,7 @@ class DebugSession:
         self._path_mapping = None
         for profileName in profileManager.get_profiles():
             profile = profileManager.get_profile(profileName)
-            if profile['dbgp_ide_key'] == initXml.attrib['idekey']:
+            if profile.get('dbgp_ide_key') == initXml.attrib['idekey']:
                 self._path_mapping = profileManager.get_pathmapping_manager(profileName)
                 break
 
@@ -99,8 +101,11 @@ class DebugSession:
             self._options[childXml.tag] = childXml.text
 
         for feature_name in self._features:
-            if self._features[feature_name] != None:
-                self.__send_command("feature_set", ['-n '+feature_name, '-v '+str(self._features[feature_name])])
+            if self._features[feature_name] is not None:
+                self.__send_command(
+                    "feature_set",
+                    ['-n '+feature_name, '-v '+str(self._features[feature_name])]
+                )
 
         feature_names = self._features.keys()
         for feature_name in feature_names:
@@ -121,7 +126,6 @@ class DebugSession:
                     'lineno':   line,
                 })
 
-        self.__send_command("step_into")
         GLib.idle_add(self.__show_window)
 
     def _update_typemap(self):
@@ -135,10 +139,10 @@ class DebugSession:
     def __show_window(self):
         builder = self._getGladeBuilder()
         window = builder.get_object("windowSession")
-        window.set_title("Running process: " + self._options['idekey']);
-     #   window.set_keep_above(True)
-        accelGroup = addiksdbgp.AddiksDBGPApp.get().get_all_windows()[0].get_accel_group()
-        window.add_accel_group(accelGroup)
+        window.set_title("Running process: " + self._options['idekey'])
+        #   window.set_keep_above(True)
+        # accelGroup = addiksdbgp.AddiksDBGPApp.get().get_all_windows()[0].get_accel_group()
+        # window.add_accel_group(accelGroup)
         window.show_all()
         start_new_thread(self.__after_show_window, ())
 
@@ -156,11 +160,16 @@ class DebugSession:
         window.hide()
 
     def is_in_breakpoint(self):
-        stack = self.get_stack()[-1]
-        if self._path_mapping != None:
+        full_stack = self.get_stack()
+        if not full_stack:
+            return False
+        stack = full_stack[-1]
+        if self._path_mapping is not None:
             stack['filename'] = self._path_mapping.mapRemoteToLocal(stack['filename'])
         if stack['filename'][0:7] == 'file://':
             stack['filename'] = stack['filename'][7:]
+        elif stack['filename'][0:5] == 'file:':
+            stack['filename'] = stack['filename'][5:]
         breakpoints = addiksdbgp.AddiksDBGPApp.get().get_all_breakpoints()
         for filePath in breakpoints:
             for line in breakpoints[filePath]:
@@ -169,7 +178,7 @@ class DebugSession:
         return False
 
     def mapRemoteToLocalPath(self, remotePath):
-        if self._path_mapping != None:
+        if self._path_mapping is not None:
             return self._path_mapping.mapRemoteToLocal(remotePath)
         return remotePath
 
@@ -181,7 +190,7 @@ class DebugSession:
     def remove_watch(self, definition):
         self._custom_watches.remove(definition)
         self.__update_view()
-    
+
     def clear_watches(self):
         self._custom_watches = []
         self._expanded_watches = []
@@ -202,13 +211,13 @@ class DebugSession:
         if fullName in self._expanded_watches:
             self._expanded_watches.remove(fullName)
             self.__update_view()
-        
+
     def __hideWindow(self):
         builder = self._getGladeBuilder()
         window = builder.get_object("windowSession")
         window.hide()
-        
-    ### COMMANDS
+
+    # ## COMMANDS
 
     def run(self, clearBreakpoints=False):
         try:
@@ -272,14 +281,14 @@ class DebugSession:
 
     def set_breakpoint(self, input_options={}):
         arguments, expression = self.__get_breakpoint_arguments(input_options)
-        responseXml = self.__send_command("breakpoint_set", arguments, expression)
-        
+        self.__send_command("breakpoint_set", arguments, expression)
+
     def list_breakpoints(self):
         responseXml = self.__send_command("breakpoint_list")
         breakpoints = {}
         for breakpointXml in responseXml:
             options = breakpointXml.attrib
-            if len(breakpointXml)>0:
+            if breakpointXml:
                 options['expression'] = breakpointXml[0].text
             else:
                 options['expression'] = None
@@ -297,7 +306,7 @@ class DebugSession:
 
     def remove_breakpoint_by_file_line(self, filePath, line):
         breakpoints = self.list_breakpoints()
-        if self._path_mapping != None:
+        if self._path_mapping is not None:
             filePath = self._path_mapping.mapLocalToRemote(filePath)
         for breakpointId in breakpoints:
             breakpoint = breakpoints[breakpointId]
@@ -305,20 +314,24 @@ class DebugSession:
                 self.remove_breakpoint(breakpointId)
 
     def remove_breakpoint(self, breakpoint_id):
-        responseXml = self.__send_command("breakpoint_remove", ['-d '+breakpoint_id])
+        self.__send_command("breakpoint_remove", ['-d '+breakpoint_id])
 
     def update_breakpoint(self, breakpoint_id, input_options={}):
         arguments, expression = self.__get_breakpoint_arguments(input_options)
         arguments.append("-d "+breakpoint_id)
-        responseXml = self.__send_command("breakpoint_update", arguments, expression)
+        self.__send_command("breakpoint_update", arguments, expression)
 
     def get_property(self, fullName):
         responseXml = self.__send_command("property_get", ['-n '+fullName])
-        if len(responseXml)>0:
+        if responseXml:
             return responseXml[0]
 
     def set_property(self, fullName, typeName, newValue):
-        responseXml = self.__send_command("property_set", ['-n '+fullName, '-t '+typeName, '-l {{#DATALENGTH#}}'], newValue)
+        self.__send_command(
+            "property_set",
+            ['-n '+fullName, '-t '+typeName, '-l {{#DATALENGTH#}}'],
+            newValue
+        )
         self.__update_view()
 
     def get_max_stack_depth(self):
@@ -326,9 +339,9 @@ class DebugSession:
         return responseXml.attrib['depth']
 
     def get_stack(self, depth=None, glib_idle_add=None):
-        #see: http://xdebug.org/docs-dbgp.php#id50
+        # see: http://xdebug.org/docs-dbgp.php#id50
         arguments = []
-        if depth != None:
+        if depth is not None:
             arguments.append("-d "+depth)
         stack = []
         if self._status in ['running', 'break']:
@@ -337,15 +350,15 @@ class DebugSession:
                 if stackXml.tag == "error":
                     break
                 stack.append(stackXml.attrib)
-            if len(stack)>0 and 'level' in stack[0]:
+            if stack and 'level' in stack[0]:
                 stack.sort(key=lambda entry: entry['level'], reverse=True)
-        if glib_idle_add != None:
+        if glib_idle_add is not None:
             GLib.idle_add(glib_idle_add, stack)
         return stack
 
     def get_context_names(self, depth=None):
         arguments = []
-        if depth != None:
+        if depth is not None:
             arguments.append("-d "+depth)
         names = {}
         if self._status in ['running', 'break']:
@@ -355,11 +368,11 @@ class DebugSession:
         return names
 
     def get_context(self, context_name_id, depth=None):
-        #see: http://xdebug.org/docs-dbgp.php#id53
+        # see: http://xdebug.org/docs-dbgp.php#id53
         responseXml = None
         if self._status in ['running', 'break']:
             arguments = ["-c "+context_name_id]
-            if depth != None:
+            if depth is not None:
                 arguments.append("-d "+depth)
 
             responseXml = self.__send_command("context_get", arguments)
@@ -368,7 +381,7 @@ class DebugSession:
     def eval_expression(self, expression):
         return self.__send_command("eval", [], expression)
 
-    ### HELPERS
+    # ## HELPERS
 
     def get_prepared_stack(self):
         return self._prepared_stack
@@ -377,7 +390,7 @@ class DebugSession:
 
         try:
 
-            ### CLEANUP
+            # ## CLEANUP
 
             userInterface = self._getGladeHandler()
             scroll = userInterface.getWatchesScrollPosition()
@@ -395,13 +408,13 @@ class DebugSession:
             if self._status in ['stopping', 'stopped']:
                 return
 
-            ### STACK-TRACE
+            # ## STACK-TRACE
 
             topStackFilepath = None
             topStackLineNr = 0
             for stack in self._prepared_stack:
 
-                if self._path_mapping != None:
+                if self._path_mapping is not None:
                     stack['filename'] = self._path_mapping.mapRemoteToLocal(stack['filename'])
 
                 if int(stack['level']) == 0:
@@ -415,15 +428,14 @@ class DebugSession:
                 line = stack["lineno"]
 
                 filepath = stack["filename"]
-                filename = stack["filename"].split("/")[-1]
 
                 userInterface.addStackRow(filepath, line, where)
 
-            if openTopFile and topStackFilepath != None:
+            if openTopFile and topStackFilepath is not None:
                 GLib.idle_add(self.open_uri_resouce, topStackFilepath, topStackLineNr)
-                 
-            ### WATCHES
-       
+
+            # ## WATCHES
+
             expandFullNames = []
 
             for definition in self._custom_watches:
@@ -440,14 +452,28 @@ class DebugSession:
 
                         fullName = definition+"["+str(index)+"]"
                         userInterface.addWatchRow(fullName, str(index), "array")
-                        userInterface.setWatchRowValue(fullName, self.__get_value_by_propertyXml(propertyXml, fullName, expandFullNames))
+                        userInterface.setWatchRowValue(
+                            fullName,
+                            self.__get_value_by_propertyXml(
+                                propertyXml,
+                                fullName,
+                                expandFullNames
+                            )
+                        )
 
                         index += 1
 
                 elif len(responseXml) == 1:
                     propertyXml = responseXml[0]
                     userInterface.addWatchRow(definition, definition)
-                    userInterface.setWatchRowValue(definition, self.__get_value_by_propertyXml(propertyXml, definition, expandFullNames))
+                    userInterface.setWatchRowValue(
+                        definition,
+                        self.__get_value_by_propertyXml(
+                            propertyXml,
+                            definition,
+                            expandFullNames
+                        )
+                    )
 
             writtenFullNames = []
             contextNames = self.get_context_names()
@@ -458,14 +484,21 @@ class DebugSession:
                 for propertyXml in contextXml:
                     fullName, name = self.__readXmlElementNames(propertyXml)
 
-                    if fullName != None and fullName not in writtenFullNames:
+                    if fullName is not None and fullName not in writtenFullNames:
 
                         if fullName in self._expanded_watches:
                             expandFullNames.append(fullName)
                             propertyXml = self.get_property(fullName)
 
                         userInterface.addWatchRow(fullName, name)
-                        userInterface.setWatchRowValue(fullName, self.__get_value_by_propertyXml(propertyXml, fullName, expandFullNames))
+                        userInterface.setWatchRowValue(
+                            fullName,
+                            self.__get_value_by_propertyXml(
+                                propertyXml,
+                                fullName,
+                                expandFullNames
+                            )
+                        )
                         writtenFullNames.append(fullName)
 
             for fullName in expandFullNames:
@@ -477,7 +510,13 @@ class DebugSession:
             GLib.idle_add(self.__hideWindow)
             addiksdbgp.AddiksDBGPApp.get().remove_session(self)
 
-    def __get_value_by_propertyXml(self, propertyXml, parentFullName, expandFullNames=[], tryTypemapUpdate=True):
+    def __get_value_by_propertyXml(
+        self,
+        propertyXml,
+        parentFullName,
+        expandFullNames=[],
+        tryTypemapUpdate=True
+    ):
         userInterface = self._getGladeHandler()
 
         tagName = propertyXml.tag
@@ -499,8 +538,7 @@ class DebugSession:
             return "{uninitialized}"
 
         elif dataType == 'object':
-            data = {}
-            if len(propertyXml)>0:
+            if propertyXml:
                 for childPropertyXml in propertyXml:
 
                     fullName, name = self.__readXmlElementNames(childPropertyXml)
@@ -510,17 +548,25 @@ class DebugSession:
                         childPropertyXml = self.get_property(fullName)
 
                     userInterface.addWatchRow(fullName, name, None, parentFullName)
-                    userInterface.setWatchRowValue(fullName, self.__get_value_by_propertyXml(childPropertyXml, fullName, expandFullNames))
+                    userInterface.setWatchRowValue(
+                        fullName,
+                        self.__get_value_by_propertyXml(
+                            childPropertyXml,
+                            fullName,
+                            expandFullNames
+                        )
+                    )
             else:
                 userInterface.addWatchRow(None, None, None, parentFullName)
-            return "object(" + propertyXml.attrib['numchildren'] + ") : " + propertyXml.attrib['classname']
+            return "object({numchildren}) : {classname}".format(
+                **propertyXml.attrib
+            )
 
-        elif dataType == 'array': # like a list
+        elif dataType == 'array':  # like a list
             return "{array is unimplemented type}"
 
-        elif dataType == 'hash': # like a dictionary
-            data = {}
-            if len(propertyXml)>0:
+        elif dataType == 'hash':  # like a dictionary
+            if propertyXml:
                 contentFound = False
                 for childPropertyXml in propertyXml:
                     if childPropertyXml.tag == "{urn:debugger_protocol_v1}property":
@@ -532,13 +578,20 @@ class DebugSession:
                             childPropertyXml = self.get_property(fullName)
 
                         userInterface.addWatchRow(fullName, name, None, parentFullName)
-                        userInterface.setWatchRowValue(fullName, self.__get_value_by_propertyXml(childPropertyXml, fullName, expandFullNames))
+                        userInterface.setWatchRowValue(
+                            fullName,
+                            self.__get_value_by_propertyXml(
+                                childPropertyXml,
+                                fullName,
+                                expandFullNames
+                            )
+                        )
                 if not contentFound:
                     return self.__readXmlElementContent(childPropertyXml)
             else:
                 userInterface.addWatchRow(None, None, None, parentFullName)
             return originalDataType + "(" + propertyXml.attrib['numchildren'] + ")"
-            
+
         elif dataType in ['string', 'float', 'int']:
             return self.__readXmlElementContent(propertyXml)
 
@@ -553,7 +606,12 @@ class DebugSession:
 
         if tryTypemapUpdate:
             self._update_typemap()
-            return self.__get_value_by_propertyXml(propertyXml, parentFullName, expandFullNames, False)
+            return self.__get_value_by_propertyXml(
+                propertyXml,
+                parentFullName,
+                expandFullNames,
+                False
+            )
 
         content = self.__readXmlElementContent(propertyXml)
         if type(content) == str:
@@ -592,26 +650,28 @@ class DebugSession:
             for nameXml in propertyXml.findall("{urn:debugger_protocol_v1}fullname"):
                 fullName = self.__readXmlElementContent(nameXml)
 
-        if fullName == None:
+        if fullName is None:
             fullName = name
-        
+
         return fullName, name
 
     def open_uri_resouce(self, uri, line=None):
-
-        if uri[0:7] == 'file://':
-            filePath = uri[7:]
-            if self._path_mapping != None:
-                filePath = self._path_mapping.mapRemoteToLocal(filePath)
+        if uri[0:5] == 'file:':
+            if uri[5:7] == '//':
+                filePath = uri[7:]
+                if self._path_mapping is not None:
+                    filePath = self._path_mapping.mapRemoteToLocal(filePath)
+            else:
+                filePath = uri[5:]
             addiksdbgp.AddiksDBGPApp.get().open_window_file(filePath, line)
 
     def __get_breakpoint_arguments(self, input_options={}):
         options = {
-            'type':          "line", # line, call, return, exception, conditional, watch
+            'type':          "line",  # line, call, return, exception, conditional, watch
             'filename':      "",
             'lineno':        1,
             'state':         "enabled",
-            'function':      "", # function name for call or return
+            'function':      "",  # function name for call or return
             'temporary':     "0",
             'hit_value':     "0",
             'hit_condition': "",
@@ -623,8 +683,8 @@ class DebugSession:
         if options['type'] not in ['line', 'call', 'return', 'exception', 'condition', 'watch']:
             raise Exception("Invalid breakpoint type '"+options['type']+"'!")
 
-        if len(options['filename'])>1:
-            if self._path_mapping != None:
+        if len(options['filename']) > 1:
+            if self._path_mapping is not None:
                 options['filename'] = self._path_mapping.mapLocalToRemote(options['filename'])
             if options['filename'][0:7] != "file://":
                 options['filename'] = "file://" + options['filename']
@@ -649,7 +709,7 @@ class DebugSession:
 
         if options['type'] in ['exception']:
             arguments.append('-x ' + options['exception'])
-        
+
         if options['type'] in ['conditional', 'watch']:
             expression = options['expression']
 
@@ -667,17 +727,17 @@ class DebugSession:
         transactionId = self._transaction_id_counter
         self._transaction_id_counter += 1
         argumentsString = ""
-        if(len(arguments)>0):
+        if arguments:
             argumentsString = " "+(" ".join(arguments))
         if command not in ["breakpoint_set"] and False:
             dataString = " -- "
         else:
             dataString = ""
-        if data != None:
+        if data is not None:
             dataString = " -- " + base64.b64encode(data.encode("utf-8")).decode("utf-8")
         argumentsString = argumentsString.replace("{{#DATALENGTH#}}", str(len(dataString)-4))
         packet = command+" -i "+str(transactionId)+argumentsString+dataString+"\0"
-        print(">>> "+packet)
+        # print(">>> "+packet)
 
         # there is already a command being executed,
         # wait until it is finished
@@ -689,19 +749,15 @@ class DebugSession:
         xml = self.__read_xml_packet(transactionId)
         self._is_waiting_for_server = False
         return xml
-        
+
     def __read_xml_packet(self, transactionId=None):
         clientSocket = self._client_socket
 
         packetBegin = clientSocket.recv(128).decode("utf-8")
 
-        if len(packetBegin)<=0:
+        if not packetBegin:
             raise socket.Error("Connection was closed")
 
-        while True:
-            if len(packetBegin)>0:
-                break
-            time.sleep(0.005)
         lengthString, xmlData = packetBegin.split('\0', 1)
 
         pendingDataSize = int(lengthString) - len(xmlData)
@@ -709,9 +765,9 @@ class DebugSession:
             dataBlock = clientSocket.recv(pendingDataSize).decode("utf-8")
             pendingDataSize -= len(dataBlock)
             xmlData += dataBlock
-            
-        endingNullByte = clientSocket.recv(1)
-    
+
+        clientSocket.recv(1)
+
         xmlData = xmlData.replace("\\n", "\n")
         xmlData = xmlData.replace("\\x00", "")
         xmlData = xmlData.replace("\0", "")
@@ -719,28 +775,28 @@ class DebugSession:
         if xmlData[-1] == "'":
             xmlData = xmlData[0:-1]
 
-        print("<<< ("+lengthString+"):"+xmlData+"\n")
+        # print("<<< ("+lengthString+"):"+xmlData+"\n")
 
         root = ElementTree.fromstring(xmlData)
 
         # make sure response and request are for the same transaction
-        if transactionId != None and 'transaction_id' in root.attrib: 
+        if transactionId is not None and 'transaction_id' in root.attrib:
             if transactionId != int(root.attrib['transaction_id']):
-                #print("+++ Skipped packet because wrong transaction_id\n")
+                # print("+++ Skipped packet because wrong transaction_id\n")
                 root = self.__read_xml_packet(transactionId)
 
         if "status" in root.attrib:
             self._status = root.attrib['status']
 
         return root
-        
+
     def _getGladeHandler(self):
-        if self._glade_handler == None:
+        if self._glade_handler is None:
             self.__initGlade()
         return self._glade_handler
 
     def _getGladeBuilder(self):
-        if self._glade_builder == None:
+        if self._glade_builder is None:
             self.__initGlade()
         return self._glade_builder
 
@@ -749,8 +805,3 @@ class DebugSession:
         self._glade_builder.add_from_file(os.path.dirname(__file__)+"/debugger.glade")
         self._glade_handler = GladeHandler(self._plugin, self._glade_builder, session=self)
         self._glade_builder.connect_signals(self._glade_handler)
-        
-
-
-
-

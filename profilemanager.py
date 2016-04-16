@@ -16,11 +16,33 @@
 
 from gi.repository import Gtk, Gdk
 from _thread import start_new_thread
-from helpers import *
+from helpers import (
+	file_get_contents,
+	file_put_contents,
+)
 from session import DebugSession
 from gladehandler import GladeHandler
 from pathmapping import PathMappingManager
 import os
+
+
+class WithProfileManagerMixin:
+    _debug_profile_manager = None
+
+    def show_profile_manager(self, foo=None):
+        self.get_profile_manager().show()
+
+    def get_profile_manager(self):
+        if self._debug_profile_manager is None:
+            self._debug_profile_manager = ProfileManager(self)
+        return self._debug_profile_manager
+
+    def get_profile(self, name):
+        return self.get_profile_manager().get_profile(name)
+
+    def get_profiles(self):
+        return self.get_profile_manager().get_profiles()
+
 
 class ProfileManager:
     def __init__(self, plugin):
@@ -106,7 +128,7 @@ class ProfileManager:
         file_put_contents(filePath, repr(options))
 
     def get_profile(self, name=None):
-        if name==None:
+        if name is None:
             name = self.get_active_profile()
         path = self.__get_profiles_path()
         filePath = path + "/" + name
